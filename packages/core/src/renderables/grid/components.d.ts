@@ -1,9 +1,9 @@
-import { GridRenderable } from "./grid.ts"
-import { GridNodeRenderable } from "./grid_node.ts"
+import GridRenderable from "./grid";
+import GridNodeRenderable from "./grid_node";
 
 declare module "@opentui/solid" {
-  interface OpenTUIComponents {
-    grid: typeof GridRenderable
-    box_focusable: typeof GridNodeRenderable
-  }
+    interface OpenTUIComponents {
+        grid: typeof GridRenderable;
+        grid_node: typeof GridNodeRenderable;
+    }
 }

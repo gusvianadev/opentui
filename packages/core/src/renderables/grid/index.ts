@@ -1,34 +1,14 @@
-import { extend } from "@opentui/solid"
-import {
-  GridRenderable,
-  type Direction,
-  type DirectionKeys,
-  type GridFocusChangeEvent,
-  type GridLayout,
-  type GridOptions,
-  type KeyCondition,
-  type KeySpec,
-} from "./grid"
-import { GridNodeRenderable, type GridNodeOptions } from "./grid_node"
+import { extend } from "@opentui/solid";
+import GridRenderable, { type GridOptions } from "./grid";
+import GridNodeRenderable, { type GridNodeOptions } from "./grid_node";
 
 export const registerGridComponents = () => {
-  extend({
-    grid: GridRenderable,
-    box_focusable: GridNodeRenderable,
-  })
-}
+    extend({
+        grid: GridRenderable,
+        grid_node: GridNodeRenderable,
+    });
+};
 
-registerGridComponents()
+registerGridComponents();
 
-export {
-  GridNodeRenderable,
-  GridRenderable,
-  type GridNodeOptions,
-  type Direction,
-  type DirectionKeys,
-  type GridFocusChangeEvent,
-  type GridLayout,
-  type GridOptions,
-  type KeyCondition,
-  type KeySpec,
-}
+export { GridNodeRenderable, GridRenderable, type GridNodeOptions, type GridOptions };

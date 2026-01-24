@@ -1,224 +1,194 @@
-import {
-  BoxRenderable,
-  RenderableEvents,
-  type BoxOptions,
-  type KeyEvent,
-  type RenderContext,
-  type Renderable,
-} from "@opentui/core"
-import {
-  bubbleKeyDown,
-  blurWithinManual,
-  clearFocusLocalRecursive,
-  focusWithinManual,
-  getFocusWithinStateSymbol,
-  getFocusLocalStateSymbol,
-  isBubblingKeyDown,
-  focusLocalStateSymbol,
-  updateFocusWithinChain,
-  updateFocusLocalFromNative,
-  focusWithinStateSymbol,
-  findNearestGrid,
-} from "./Grid"
+import { BoxRenderable, KeyEvent, Renderable, RenderableEvents } from "@opentui/core"
+import { type RenderContext } from "@opentui/core"
+import GridRenderable from "./grid"
+import { bubbleKeyDown, walkGridNodeAncestors } from "./utils"
+import { prevFocusedRenderable, type AddPrevFocusedRenderable } from "./symbols"
+import type {
+  EventHandler,
+  BlurEvent,
+  BlurLocalEvent,
+  BlurWithinEvent,
+  FocusEvent,
+  FocusLocalEvent,
+  FocusWithinEvent,
+  GridNodeOptions,
+} from "./types"
 
-export interface GridNodeOptions extends BoxOptions<BoxRenderable> {
-  onKeyDown?: (event: KeyEvent) => void
-  onFocus?: (ref: GridNodeRenderable) => void
-  onBlur?: (ref: GridNodeRenderable) => void
-  onFocusWithin?: (ref: GridNodeRenderable) => void
-  onBlurWithin?: (ref: GridNodeRenderable) => void
-  onFocusLocal?: (ref: GridNodeRenderable) => void
-  onBlurLocal?: (ref: GridNodeRenderable) => void
-}
+export default class GridNodeRenderable extends BoxRenderable {
+  /** Grid coordinates in the parent matrix. Managed externally. */
+  public coords: [number, number] = [0, 0]
 
-export class GridNodeRenderable extends BoxRenderable {
+  // === Focus state ===
+  /** Tracks focus-within for the grid subtree. */
+  protected _focusedWithin: boolean = false
+
+  /** Focus handlers for this node. */
+  public _onFocus?: EventHandler<FocusEvent<this>>
+  public _onFocusWithin?: EventHandler<FocusWithinEvent<this>>
+  public _onFocusLocal?: EventHandler<FocusLocalEvent<this>>
+
+  /** Blur handlers for this node. */
+  public _onBlur?: EventHandler<BlurEvent<this>>
+  public _onBlurWithin?: EventHandler<BlurWithinEvent<this>>
+  public _onBlurLocal?: EventHandler<BlurLocalEvent<this>>
+
+  // === Key handling ===
+  /** Stored external handler so we can wrap bubbling logic safely. */
   private externalKeyDown?: (event: KeyEvent) => void
-  private focusHandler?: (ref: GridNodeRenderable) => void
-  private blurHandler?: (ref: GridNodeRenderable) => void
-  private focusWithinHandler?: (ref: GridNodeRenderable) => void
-  private blurWithinHandler?: (ref: GridNodeRenderable) => void
-  private focusLocalHandler?: (ref: GridNodeRenderable) => void
-  private blurLocalHandler?: (ref: GridNodeRenderable) => void
-  private focusWithinState = false
-  private focusLocalRef = false
-  private nativeFocused = false
 
   constructor(ctx: RenderContext, options: GridNodeOptions) {
-    const { onKeyDown, onFocus, onBlur, onFocusWithin, onBlurWithin, onFocusLocal, onBlurLocal, ...rest } = options
-
-    super(ctx, rest)
+    super(ctx, options)
 
     this._focusable = true
-    this.externalKeyDown = onKeyDown
-    this.focusHandler = onFocus
-    this.blurHandler = onBlur
-    this.focusWithinHandler = onFocusWithin
-    this.blurWithinHandler = onBlurWithin
-    this.focusLocalHandler = onFocusLocal
-    this.blurLocalHandler = onBlurLocal
-    super.onKeyDown = this.handleKeyDown
     this.on(RenderableEvents.FOCUSED, this.handleFocusEvent)
     this.on(RenderableEvents.BLURRED, this.handleBlurEvent)
-    this.syncInitialFocus()
   }
 
-  private syncInitialFocus() {
-    if (this.nativeFocused) {
-      return
+  // === Identity ===
+  /** Sync id changes back into the parent grid lookup table. */
+  public override set id(id: string) {
+    const previousId = super.id
+    super.id = id
+
+    if (this.parent instanceof GridRenderable && previousId !== id) {
+      this.parent.updateChildId(previousId, id, this)
     }
-    const focused = this.getFocusedRenderable()
-    if (focused === this) {
-      this.handleFocusEvent()
+  }
+
+  public override get id() {
+    return super.id
+  }
+
+  // === Focus: primary ===
+  set onFocus(handler: EventHandler<FocusWithinEvent<this>> | undefined) {
+    this._onFocus = handler
+  }
+  get onFocus(): EventHandler<FocusWithinEvent<this>> | undefined {
+    return this._onFocus
+  }
+
+  set onBlur(handler: EventHandler<BlurEvent<this>> | undefined) {
+    this._onBlur = handler
+  }
+  get onBlur() {
+    return this._onBlur
+  }
+
+  /** Primary focus handler. Updates focus-within and local focus state. */
+  private handleFocusEvent() {
+    let current: Renderable | null = this
+
+    while (current) {
+      if (!(current instanceof GridNodeRenderable)) {
+        current = current.parent
+        continue
+      }
+
+      if (current.focusedWithin) {
+        // Blur any previous focus-within chain before re-focusing.
+        walkGridNodeAncestors((this._ctx as AddPrevFocusedRenderable)[prevFocusedRenderable], current, (node) =>
+          node.blurWithin(),
+        )
+        break
+      }
+
+      // Bubble focus-within and focus-local up to the grid root.
+      current.focusWithin()
+      current.focusLocal()
+      current = current.parent
+    }
+
+    // NOTE: This must be called after the while loop, otherwise someone could do
+    // `onFocus={() => somethingElse.focus()}` and break the whole chain.
+    this._onFocus?.({ target: this })
+    this.focusLocal()
+  }
+
+  /** Stores the last focused node so focus-within can be blurred next time. */
+  private handleBlurEvent() {
+    this._onBlur?.({ target: this })
+    ;(this._ctx as AddPrevFocusedRenderable)[prevFocusedRenderable] = this
+  }
+
+  // === Focus: within ===
+  set onFocusWithin(handler: EventHandler<FocusWithinEvent<this>> | undefined) {
+    this._onFocusWithin = handler
+  }
+  get onFocusWithin(): EventHandler<FocusWithinEvent<this>> | undefined {
+    return this._onFocusWithin
+  }
+
+  set onBlurWithin(handler: EventHandler<BlurWithinEvent<this>> | undefined) {
+    this._onBlurWithin = handler
+  }
+  get onBlurWithin() {
+    return this._onBlurWithin
+  }
+
+  protected get focusedWithin() {
+    return this._focusedWithin
+  }
+
+  protected focusWithin() {
+    this._focusedWithin = true
+    this._onFocusWithin?.({
+      target: this,
+    })
+  }
+
+  protected blurWithin() {
+    this._focusedWithin = false
+    this._onBlurWithin?.({ target: this })
+  }
+
+  // === Focus: local ===
+  set onFocusLocal(handler: EventHandler<FocusLocalEvent<this>> | undefined) {
+    this._onFocusLocal = handler
+  }
+  get onFocusLocal(): EventHandler<FocusLocalEvent<this>> | undefined {
+    return this._onFocusLocal
+  }
+
+  set onBlurLocal(handler: EventHandler<BlurLocalEvent<this>> | undefined) {
+    this._onBlurLocal = (ev) => {
+      // Blur normal focus first to keep parent state consistent.
+      this.blur()
+      this.blurWithin()
+      handler?.({ target: ev.target })
     }
   }
-
-  private getFocusedRenderable(): Renderable | null {
-    const renderer = this.ctx as unknown as { currentFocusedRenderable?: Renderable | null }
-    return renderer.currentFocusedRenderable ?? null
+  get onBlurLocal() {
+    return this._onBlurLocal
+  }
+  public get focusedLocal() {
+    return !(this.parent instanceof GridRenderable) || this.parent.currentFocusLocal === this
   }
 
-  private handleFocusEvent = () => {
-    if (!this.nativeFocused) {
-      this.nativeFocused = true
-    }
-    this.focusHandler?.(this)
-    updateFocusWithinChain(this)
-    updateFocusLocalFromNative(this)
+  /** Request local focus from the parent grid. */
+  public focusLocal() {
+    if (!(this.parent instanceof GridRenderable)) return
+    this.parent.currentFocusLocal = this
   }
 
-  private handleBlurEvent = () => {
-    this.nativeFocused = false
-    this.blurHandler?.(this)
+  /** Drop local focus in the parent grid. */
+  public blurLocal() {
+    if (!(this.parent instanceof GridRenderable)) return
+    this.parent.currentFocusLocal = undefined
   }
 
-  override set onKeyDown(handler: ((event: KeyEvent) => void) | undefined) {
+  // === Key handling ===
+  /** Wrap keydown to bubble to ancestors once local handlers run. */
+  public override set onKeyDown(handler: ((key: KeyEvent) => void) | undefined) {
     this.externalKeyDown = handler
-    super.onKeyDown = this.handleKeyDown
-  }
 
-  override get onKeyDown(): ((event: KeyEvent) => void) | undefined {
-    return super.onKeyDown
-  }
-
-  set onFocus(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.focusHandler = handler
-  }
-
-  get onFocus(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.focusHandler
-  }
-
-  set onBlur(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.blurHandler = handler
-  }
-
-  get onBlur(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.blurHandler
-  }
-
-  set onFocusWithin(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.focusWithinHandler = handler
-  }
-
-  get onFocusWithin(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.focusWithinHandler
-  }
-
-  set onBlurWithin(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.blurWithinHandler = handler
-  }
-
-  get onBlurWithin(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.blurWithinHandler
-  }
-
-  set onFocusLocal(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.focusLocalHandler = handler
-  }
-
-  get onFocusLocal(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.focusLocalHandler
-  }
-
-  set onBlurLocal(handler: ((ref: GridNodeRenderable) => void) | undefined) {
-    this.blurLocalHandler = handler
-  }
-
-  get onBlurLocal(): ((ref: GridNodeRenderable) => void) | undefined {
-    return this.blurLocalHandler
-  }
-
-  override focus() {
-    super.focus()
-    this[focusWithinStateSymbol](true)
-    updateFocusWithinChain(this)
-    updateFocusLocalFromNative(this)
-  }
-
-  focusWithin() {
-    focusWithinManual(this)
-  }
-
-  blurWithin() {
-    blurWithinManual(this)
-  }
-
-  focusLocal() {
-    const grid = findNearestGrid(this)
-    if (grid) {
-      grid.setLocalFocusForDescendant(this)
-      return
-    }
-    this[focusLocalStateSymbol](true)
-  }
-
-  blurLocal() {
-    this[focusLocalStateSymbol](false)
-  }
-
-  blurLocalChain() {
-    clearFocusLocalRecursive(this)
-  }
-
-  private handleKeyDown = (event: KeyEvent) => {
-    this.externalKeyDown?.(event)
-
-    if (event.defaultPrevented || event.propagationStopped || isBubblingKeyDown(event)) {
-      return
-    }
-
-    bubbleKeyDown(this, event)
-  };
-
-  [focusWithinStateSymbol](next: boolean) {
-    if (this.focusWithinState === next) {
-      return
-    }
-    this.focusWithinState = next
-    if (next) {
-      this.focusWithinHandler?.(this)
-    } else {
-      this.blurWithinHandler?.(this)
+    super.onKeyDown = (event: KeyEvent) => {
+      // Invoke external handler first, then bubble upward.
+      handler?.(event)
+      bubbleKeyDown(this, event)
     }
   }
 
-  [getFocusWithinStateSymbol](): boolean {
-    return this.focusWithinState
-  }
-
-  [focusLocalStateSymbol](next: boolean) {
-    if (this.focusLocalRef === next) {
-      return
-    }
-    this.focusLocalRef = next
-    if (next) {
-      this.focusLocalHandler?.(this)
-    } else {
-      this.blurLocalHandler?.(this)
-    }
-  }
-
-  [getFocusLocalStateSymbol](): boolean {
-    return this.focusLocalRef
+  public override get onKeyDown() {
+    return this.externalKeyDown
   }
 }
