@@ -1,4 +1,4 @@
-import { GridKeys } from "./types"
+import type { GridKeys } from "./types"
 
 export const innerGridKeys = (props: {
   orientation: "vertical" | "horizontal"
@@ -72,15 +72,19 @@ export const outerGridKeys = {
     overflowBehavior: "wrap-around",
     left: {
       name: "left",
+      conditions: ["ctrl"],
     },
     right: {
       name: "right",
+      conditions: ["ctrl"],
     },
     up: {
       name: "up",
+      conditions: ["ctrl"],
     },
     down: {
       name: "down",
+      conditions: ["ctrl"],
     },
   },
 }

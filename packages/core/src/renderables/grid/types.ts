@@ -4,16 +4,17 @@ import type GridNodeRenderable from "./grid_node"
 
 // === Key configuration ===
 /** Modifier keys that must be held for a keybinding. */
-export type KeySettingsConditions = "ctrl" | "meta" | "shift" | "option"
+export type KeySettingsCondition = "ctrl" | "meta" | "shift" | "option"
 /** How movement behaves when a direction runs out of bounds. */
 export type MovementOverflowBehavior = "stop" | "bubble" | "wrap-around"
 
 /** Key configuration for movement or actions. */
 export interface KeySettings {
   name: string
-  conditions?: [KeySettingsConditions]
+  conditions?: KeySettingsCondition[]
   overflowBehavior?: MovementOverflowBehavior
 }
+export interface ActionKeySettings extends Omit<KeySettings, "overflowBehavior"> {}
 
 /** Logical directions supported by grid navigation. */
 export type MovementDirection = "left" | "right" | "up" | "down"
@@ -27,8 +28,8 @@ export interface GridMovement extends Partial<Record<MovementDirection, KeySetti
 export type GridKeys = {
   movement: GridMovement
   actions?: {
-    focus: KeySettings
-    unfocus: KeySettings
+    focus: ActionKeySettings
+    unfocus: ActionKeySettings
   }
 }
 
@@ -63,6 +64,8 @@ export interface BlurWithinEvent<TTarget extends GridNodeRenderable = GridNodeRe
 
 /** Blur event for local focus inside a grid. */
 export interface BlurLocalEvent<TTarget extends GridNodeRenderable = GridNodeRenderable> extends BlurEvent<TTarget> {}
+
+export type GridCoords = [number, number]
 
 // === Node options ===
 export interface GridNodeOptions<TTarget extends GridNodeRenderable = GridNodeRenderable>

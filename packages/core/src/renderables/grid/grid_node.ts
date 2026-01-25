@@ -44,6 +44,10 @@ export default class GridNodeRenderable extends BoxRenderable {
     this.on(RenderableEvents.BLURRED, this.handleBlurEvent)
   }
 
+  override focus() {
+    super.focus()
+  }
+
   // === Identity ===
   /** Sync id changes back into the parent grid lookup table. */
   public override set id(id: string) {
